@@ -5,7 +5,6 @@ Differential Gene Expression
 
 """
 import sys
-import copy
 from types import SimpleNamespace as namespace
 
 import numpy as np
@@ -31,9 +30,25 @@ from .utils import group as grouputils
 from .utils.settings import SetContextHandler
 
 
+def nan_greater_equal(a, b):
+    with np.errstate(invalid="ignore"):
+        return (a >= b) | np.isnan(a) | np.isnan(b)
+
+
+def fold_change_check(a, b, axis=0):
+    return np.all(nan_greater_equal(a, 0)) and \
+           np.all(nan_greater_equal(a, 0))
+
+
 def score_fold_change(a, b, axis=0):
     """
     Calculate the fold change between `a` and `b` samples.
+
+    Both `a` and `b` MUST NOT contain negative values.
+
+    .. note::
+        The input data (measurements) should be on a ratio scale,
+        fold change does not make sense otherwise.
 
     Parameters
     ----------
@@ -45,29 +60,25 @@ def score_fold_change(a, b, axis=0):
     Returns
     -------
     FC : array
-        The FC scores
+        The fold change scores
     """
+    assert fold_change_check(a, b, axis), "negative values in input"
     mean_a = np.nanmean(a, axis=axis)
     mean_b = np.nanmean(b, axis=axis)
-    res = mean_a / mean_b
-    warning = None
-    if np.any(res < 0):
-        res[res < 0] = float("nan")
-        warning = "Negative fold change scores were ignored. You should use another scoring method."
-    return res, warning
+    return  mean_a / mean_b
 
 
 def score_log_fold_change(a, b, axis=0):
     """
     Return the log2(FC).
 
+    Both `a` and `b` MUST NOT contain negative values.
+
     See Also
     --------
     score_fold_change
-
     """
-    s, w = score_fold_change(a, b, axis=axis) 
-    return np.log2(s), w
+    return np.log2(score_fold_change(a, b, axis=axis))
 
 
 def score_ttest(a, b, axis=0):
@@ -516,6 +527,37 @@ def test_middle(array, low, high):
     return (array <= high) | (array >= low)
 
 
+def all_non_negative(X):
+    """
+    Check that array X contains only non negative values.
+
+    (NaNs are allowed)
+    """
+    return np.all(nan_greater_equal(X, 0))
+
+
+class DiffExpTest(object):
+    #: Selection types
+    LowTail, HighTail, TwoTail = 1, 2, 3
+
+    #: Test type (Multiplicity/Arity)- i.e a two sample (t-test, ...)
+    #: or multi-sample (ANOVA) test
+    TwoSampleTest, VarSampleTest = 1, 2
+    #: Available scoring methods
+
+    def __init__(self, name, tail, arity, score_func):
+        self.name = name
+        self.tail = tail
+        self.arity = arity
+        self.score_func = score_func
+
+    def __repr__(self):
+        return ("{type.__name__}(name={self.name}, ...)"
+                .format(type=type(self), self=self))
+
+    __str__ = __repr__
+
+
 class OWFeatureSelection(widget.OWWidget):
     name = "Differential Expression"
     description = "Gene selection by differential expression analysis."
@@ -527,23 +569,45 @@ class OWFeatureSelection(widget.OWWidget):
                ("Remaining data subset", Orange.data.Table),
                ("Selected genes", Orange.data.Table)]
 
-    #: Selection types
-    LowTail, HighTail, TwoTail = 1, 2, 3
-    #: Test type - i.e a two sample (t-test, ...) or multi-sample (ANOVA) test
-    TwoSampleTest, VarSampleTest = 1, 2
     #: Available scoring methods
-
     Scores = [
-        ("Fold Change", TwoTail, TwoSampleTest, score_fold_change),
-        ("log2(Fold Change)", TwoTail, TwoSampleTest, score_log_fold_change),
-        ("T-test", TwoTail, TwoSampleTest, score_ttest_t),
-        ("T-test P-value", LowTail, TwoSampleTest, score_ttest_p),
-        ("ANOVA", HighTail, VarSampleTest, score_anova_f),
-        ("ANOVA P-value", LowTail, VarSampleTest, score_anova_p),
-        ("Signal to Noise Ratio", TwoTail, TwoSampleTest,
-         score_signal_to_noise),
-        ("Mann-Whitney", LowTail, TwoSampleTest, score_mann_whitney_u),
+        DiffExpTest(
+            "Fold Change",
+            DiffExpTest.TwoTail, DiffExpTest.TwoSampleTest,
+            score_fold_change),
+        DiffExpTest(
+            "log2(Fold Change)",
+            DiffExpTest.TwoTail, DiffExpTest.TwoSampleTest,
+            score_log_fold_change),
+        DiffExpTest(
+            "T-test",
+            DiffExpTest.TwoTail, DiffExpTest.TwoSampleTest,
+            score_ttest_t),
+        DiffExpTest(
+            "T-test P-value",
+            DiffExpTest.LowTail, DiffExpTest.TwoSampleTest,
+            score_ttest_p),
+        DiffExpTest(
+            "ANOVA",
+            DiffExpTest.HighTail, DiffExpTest.VarSampleTest,
+            score_anova_f),
+        DiffExpTest(
+            "ANOVA P-value",
+            DiffExpTest.LowTail, DiffExpTest.VarSampleTest,
+            score_anova_p),
+        DiffExpTest(
+            "Signal to Noise Ratio",
+            DiffExpTest.TwoTail, DiffExpTest.TwoSampleTest,
+            score_signal_to_noise),
+        DiffExpTest(
+            "Mann-Whitney",
+            DiffExpTest.LowTail, DiffExpTest.TwoSampleTest,
+            score_mann_whitney_u)
     ]
+    #: pulled to class namespace for special casing in the code.
+    #: note these are checked by instance identity (is operator),
+    #: DO NOT reassign
+    FoldChange, LogFoldChange = Scores[0], Scores[1]
 
     settingsHandler = SetContextHandler()
 
@@ -581,7 +645,7 @@ class OWFeatureSelection(widget.OWWidget):
         widget.OWWidget.__init__(self, parent)
 
         self.min_value, self.max_value = \
-            self.thresholds.get(self.Scores[self.score_index][0], (1, 0))
+            self.thresholds.get(self.Scores[self.score_index].name, (1, 0))
 
         #: Input data set
         self.data = None
@@ -597,9 +661,9 @@ class OWFeatureSelection(widget.OWWidget):
         self.__in_progress = False
 
         self.test_f = {
-            OWFeatureSelection.LowTail: test_low,
-            OWFeatureSelection.HighTail: test_high,
-            OWFeatureSelection.TwoTail: test_two_tail,
+            DiffExpTest.LowTail: test_low,
+            DiffExpTest.HighTail: test_high,
+            DiffExpTest.TwoTail: test_two_tail,
         }
 
         self.histogram = Histogram(
@@ -624,7 +688,7 @@ class OWFeatureSelection(widget.OWWidget):
 
         box1 = gui.widgetBox(self.controlArea, "Scoring Method")
         gui.comboBox(box1, self, "score_index",
-                     items=[sm[0] for sm in self.Scores],
+                     items=[sm.name for sm in self.Scores],
                      callback=[self.on_scoring_method_changed,
                                self.update_scores])
 
@@ -811,12 +875,19 @@ class OWFeatureSelection(widget.OWWidget):
         if not self.data or grp is None:
             return
 
-        _, side, test_type, score_func = self.Scores[self.score_index]
+        score = self.Scores[self.score_index]
+        if score is OWFeatureSelection.FoldChange or \
+                score is OWFeatureSelection.LogFoldChange:
+            if not all_non_negative(self.data.X):
+                self.error(0, "Using '{}' but input data contains negative values!"
+                           .format(score.name))
+                return
 
-        def compute_scores(X, group_indices, warn=False):
+        test_type, score_func = score.arity, score.score_func
+
+        def compute_scores(X, group_indices):
             arrays = [X[ind] for ind in group_indices]
-            ss = score_func(*arrays, axis=0)
-            return ss[0] if isinstance(ss, tuple) and not warn else ss
+            return score_func(*arrays, axis=0)
 
         def permute_indices(group_indices, random_state=None):
             assert all(ind.dtype.kind == "i" for ind in group_indices)
@@ -833,12 +904,12 @@ class OWFeatureSelection(widget.OWWidget):
         else:
             axis = 1
 
-        if test_type == OWFeatureSelection.TwoSampleTest:
+        if test_type == DiffExpTest.TwoSampleTest:
             G1 = grouputils.group_selection_mask(
                 self.data, grp, split_selection)
             G2 = ~G1
             indices = [np.flatnonzero(G1), np.flatnonzero(G2)]
-        elif test_type == self.VarSampleTest:
+        elif test_type == DiffExpTest.VarSampleTest:
             indices = [grouputils.group_selection_mask(self.data, grp, [i])
                        for i in range(len(grp.values))]
             indices = [np.flatnonzero(ind) for ind in indices]
@@ -863,7 +934,7 @@ class OWFeatureSelection(widget.OWWidget):
         def compute_scores_with_perm(X, indices, nperm=0, rstate=None,
                                      progress_advance=None):
             warning = None
-            scores = compute_scores(X, indices, warn=True)
+            scores = compute_scores(X, indices)
             if isinstance(scores, tuple):
                 scores, warning = scores
 
@@ -934,7 +1005,7 @@ class OWFeatureSelection(widget.OWWidget):
                     results = scores.result()
                 except Exception as ex:
                     sys.excepthook(*sys.exc_info())
-                    self.error(1, "Error: {!s}", ex)
+                    self.error(1, "{0.__name__}: {1!s}".format(type(ex), ex))
                 else:
                     self.set_scores(*results)
 
@@ -977,8 +1048,9 @@ class OWFeatureSelection(widget.OWWidget):
         nulldist (P, N) array optional
             The scores obtained under P permutations of labels.
         """
-        score_name, side, test_type, _ = self.Scores[scoreindex]
-        low, high = self.thresholds.get(score_name, (-np.inf, np.inf))
+        score = self.Scores[scoreindex]
+        side, test_type = score.tail, score.arity
+        low, high = self.thresholds.get(score.name, (-np.inf, np.inf))
 
         validmask = np.isfinite(scores)
         validscores = scores[validmask]
@@ -1011,11 +1083,11 @@ class OWFeatureSelection(widget.OWWidget):
 
         low, high = max(low, minx), min(high, maxx)
 
-        if side == OWFeatureSelection.LowTail:
+        if side == DiffExpTest.LowTail:
             mode = Histogram.Low
-        elif side == OWFeatureSelection.HighTail:
+        elif side == DiffExpTest.HighTail:
             mode = Histogram.High
-        elif side == OWFeatureSelection.TwoTail:
+        elif side == DiffExpTest.TwoTail:
             mode = Histogram.TwoSided
         else:
             assert False
@@ -1024,11 +1096,11 @@ class OWFeatureSelection(widget.OWWidget):
 
         # If this is a two sample test add markers to the left and right
         # plot indicating which group is over-expressed in that part
-        if test_type == OWFeatureSelection.TwoSampleTest and \
-                side == OWFeatureSelection.TwoTail:
+        if test_type == DiffExpTest.TwoSampleTest and \
+                side == DiffExpTest.TwoTail:
             maxy = np.max(freq)
-            # XXX: Change use of integer constant
-            if scoreindex == 0:  # fold change is centered on 1.0
+            if score is OWFeatureSelection.FoldChange:
+                # fold change is centered on 1.0
                 x1, y1 = (minx + 1) / 2, maxy
                 x2, y2 = (maxx + 1) / 2, maxy
             else:
@@ -1051,6 +1123,8 @@ class OWFeatureSelection(widget.OWWidget):
             labelitem.setPos(x2, y2)
             self.histogram.addItem(labelitem)
 
+        self.histogram.autoRange()
+
     def update_data_info_label(self):
         if self.data is not None:
             samples, genes = len(self.data), len(self.data.domain.attributes)
@@ -1071,7 +1145,7 @@ class OWFeatureSelection(widget.OWWidget):
         if self.data is not None and self.scores is not None:
             scores = self.scores
             low, high = self.min_value, self.max_value
-            _, side, _, _ = self.Scores[self.score_index]
+            side = self.Scores[self.score_index].tail
             test = self.test_f[side]
             count_undef = np.count_nonzero(np.isnan(scores))
             count_scores = len(scores)
@@ -1095,8 +1169,8 @@ class OWFeatureSelection(widget.OWWidget):
 
     def __on_histogram_plot_selection_changed(self):
         low, high = self.histogram.boundary()
-        scorename, side, _, _ = self.Scores[self.score_index]
-        self.thresholds[scorename] = (low, high)
+        score = self.Scores[self.score_index]
+        self.thresholds[score.name] = (low, high)
         self.min_value = low
         self.max_value = high
         self.update_selected_info_label()
@@ -1108,12 +1182,12 @@ class OWFeatureSelection(widget.OWWidget):
         if self.data is None:
             return
 
-        _, side, _, _ = self.Scores[self.score_index]
-        if side == OWFeatureSelection.LowTail:
+        score = self.Scores[self.score_index]
+        if score.tail == DiffExpTest.LowTail:
             self.histogram.setLower(self.min_value)
-        elif side == OWFeatureSelection.HighTail:
+        elif score.tail == DiffExpTest.HighTail:
             self.histogram.setUpper(self.max_value)
-        elif side == OWFeatureSelection.TwoTail:
+        elif score.tail == DiffExpTest.TwoTail:
             self.histogram.setBoundary(self.min_value, self.max_value)
 
         self._invalidate_selection()
@@ -1124,28 +1198,27 @@ class OWFeatureSelection(widget.OWWidget):
         """
         if self.scores is None:
             return
-
-        score_name, side, _, _ = self.Scores[self.score_index]
+        score = self.Scores[self.score_index]
         scores = self.scores
         scores = np.sort(scores[np.isfinite(scores)])
 
-        if side == OWFeatureSelection.HighTail:
+        if score.tail == DiffExpTest.HighTail:
             cut = scores[-np.clip(self.n_best, 1, len(scores))]
             self.histogram.setUpper(cut)
-        elif side == OWFeatureSelection.LowTail:
+        elif score.tail == DiffExpTest.LowTail:
             cut = scores[np.clip(self.n_best, 0, len(scores) - 1)]
             self.histogram.setLower(cut)
-        elif side == OWFeatureSelection.TwoTail:
+        elif score.tail == DiffExpTest.TwoTail:
             n = min(self.n_best, len(scores))
             scoresabs = np.abs(scores)
-            if score_name == "Fold Change":
+            if score is OWFeatureSelection.FoldChange:
                 # comparing fold change on a logarithmic scale
                 scores = np.log2(scoresabs)
                 scores = scores[np.isfinite(scoresabs)]
             scoresabs = np.sort(np.abs(scores))
             limit = (scoresabs[-n] + scoresabs[-min(n+1, len(scores))]) / 2
             cuthigh, cutlow = limit, -limit
-            if score_name == "Fold Change":
+            if score is OWFeatureSelection.FoldChange:
                 cuthigh, cutlow = 2**cuthigh, 2**cutlow
             self.histogram.setBoundary(cutlow, cuthigh)
         self._invalidate_selection()
@@ -1154,22 +1227,22 @@ class OWFeatureSelection(widget.OWWidget):
         if not self.nulldist:
             return
 
-        _, side, _, _ = self.Scores[self.score_index]
+        score = self.Scores[self.score_index]
         nulldist = np.asarray(self.nulldist).ravel()
         nulldist = nulldist[np.isfinite(nulldist)]
         nulldist = np.sort(nulldist)
 
         assert 0 <= self.alpha_value <= 1
         p = self.alpha_value
-        if side == OWFeatureSelection.HighTail:
+        if score.tail == DiffExpTest.HighTail:
             cut = np.percentile(nulldist, [100 * (1 - p)])
             self.max_value = cut
             self.histogram.setUpper(cut)
-        elif side == OWFeatureSelection.LowTail:
+        elif score.tail == DiffExpTest.LowTail:
             cut = np.percentile(nulldist, [100 * p])
             self.min_value = cut
             self.histogram.setLower(cut)
-        elif side == OWFeatureSelection.TwoTail:
+        elif score.tail == DiffExpTest.TwoTail:
             p1, p2 = np.percentile(nulldist, [100 * p / 2, 100 * (1 - p / 2)])
             self.histogram.setBoundary(p1, p2)
         self._invalidate_selection()
@@ -1190,16 +1263,16 @@ class OWFeatureSelection(widget.OWWidget):
         self.update_scores()
 
     def on_scoring_method_changed(self):
-        _, _, test_type, _ = self.Scores[self.score_index]
+        score = self.Scores[self.score_index]
         self.label_selection_widget.values_view.setEnabled(
-            test_type == OWFeatureSelection.TwoSampleTest
+            score.arity == DiffExpTest.TwoSampleTest
         )
         self.__update_threshold_spinbox()
 
     def __update_threshold_spinbox(self):
-        _, side, _, _ = self.Scores[self.score_index]
-        self.low_value_spin.setVisible(side & OWFeatureSelection.LowTail)
-        self.max_value_spin.setVisible(side & OWFeatureSelection.HighTail)
+        score = self.Scores[self.score_index]
+        self.low_value_spin.setVisible(score.tail & DiffExpTest.LowTail)
+        self.max_value_spin.setVisible(score.tail & DiffExpTest.HighTail)
 
     def commit(self):
         """
@@ -1213,13 +1286,12 @@ class OWFeatureSelection(widget.OWWidget):
             axis = 1
         else:
             axis = 0
-
-        score_name, side, _, _ = self.Scores[self.score_index]
+        score = self.Scores[self.score_index]
         low, high = self.histogram.boundary()
 
         scores = self.scores
         mask = np.isfinite(scores)
-        test = self.test_f[side]
+        test = self.test_f[score.tail]
         selected_masked = test(scores[mask], low, high)
         selected = np.zeros_like(scores, dtype=bool)
         selected[mask] = selected_masked
@@ -1231,7 +1303,7 @@ class OWFeatureSelection(widget.OWWidget):
 
         if axis == 0:
             # Select rows
-            score_var = Orange.data.ContinuousVariable(score_name)
+            score_var = Orange.data.ContinuousVariable(score.name)
             domain = Orange.data.Domain(domain.attributes, domain.class_vars,
                                         domain.metas + (score_var,))
             data = self.data.from_table(domain, self.data)
@@ -1241,8 +1313,8 @@ class OWFeatureSelection(widget.OWWidget):
         else:
             # select columns
             attrs = [copy_variable(var) for var in domain.attributes]
-            for var, score in zip(attrs, scores):
-                var.attributes[score_name] = str(score)
+            for var, score_val in zip(attrs, scores):
+                var.attributes[score.name] = str(score_val)
 
             selected_attrs = [attrs[i] for i in indices]
             remaining_attrs = [attrs[i] for i in remaining]
