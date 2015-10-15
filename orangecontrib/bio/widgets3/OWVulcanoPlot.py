@@ -29,6 +29,9 @@ from .utils import gui as guiutils
 from .utils import group as grouputils
 from .utils.settings import SetContextHandler
 
+from .OWFeatureSelection import score_log_fold_change, nan_greater_equal
+
+
 NAME = "Volcano Plot"
 DESCRIPTION = "Plots fold change vs. p-value.)"
 ICON = "icons/VolcanoPlot.svg"
@@ -466,7 +469,7 @@ class OWVolcanoPlot(widget.OWWidget):
         ## GUI
         box = gui.widgetBox(self.controlArea, "Info")
         self.infoLabel = gui.label(box, self, "")
-        self.infoLabel.setText("No data on input")
+        self.infoLabel.setText("No data on input\n")
         self.infoLabel2 = gui.label(box, self, "")
         self.infoLabel2.setText("0 selected genes")
 
@@ -496,6 +499,8 @@ class OWVolcanoPlot(widget.OWWidget):
         return QSize(800, 600)
 
     def clear(self):
+        self.infoLabel.setText("No data on input\n")
+        self.infoLabel2.setText("0 selected genes")
         self.targets = []
         self.stored_selections = []
         self.target_widget.setModel(None)
@@ -508,9 +513,16 @@ class OWVolcanoPlot(widget.OWWidget):
     def set_data(self, data=None):
         self.closeContext()
         self.clear()
+
+        self.error([0, 1])
+        self.warning([0, 1, 2])
+        if data is not None:
+            if not numpy.all(nan_greater_equal(data.X, 0)):
+                self.error(1, "Input contains negative values!")
+                data = None
+
         self.data = data
-        self.error(0)
-        self.warning([0, 1])
+
         if data is not None:
             self.init_from_data()
 
@@ -547,7 +559,7 @@ class OWVolcanoPlot(widget.OWWidget):
 
             self.plot()
         else:
-            self.infoLabel.setText("No data on input.")
+            self.infoLabel.setText("No data on input.\n")
 
         self.unconditional_commit()
 
@@ -641,8 +653,8 @@ class OWVolcanoPlot(widget.OWWidget):
                 )
 
             with numpy.errstate(divide="ignore", invalid="ignore"):
-                fold = numpy.log2(numpy.mean(X[:, I1], axis=1) /
-                                  numpy.mean(X[:, I2], axis=1))
+                A, B = X[:, I1], X[:, I2]
+                fold = score_log_fold_change(A, B, axis=1)
 
                 # TODO: handle missing values better (mstats)
                 _, P = scipy.stats.ttest_ind(X[:, I1], X[:, I2], axis=1,
@@ -653,9 +665,11 @@ class OWVolcanoPlot(widget.OWWidget):
             self.validindices = numpy.flatnonzero(mask)
             self.graph.setPlotData(numpy.array([fold[mask], -logP[mask]]).T)
 
-            self.infoLabel.setText("%i genes on input" % len(fold))
-            # ("{displayed} displayed, {undef} with undefined ratio "
-            #  "or t-statistics.")
+            self.infoLabel.setText(
+                "{} genes on input\n"
+                "{} with undefined ratio or t-statistics"
+                .format(len(fold), len(fold) - len(self.validindices))
+            )
 
             if not len(numpy.flatnonzero(mask)):
                 self.warning(1, "Could not compute statistics for any genes!")
