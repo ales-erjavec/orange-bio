@@ -29,6 +29,7 @@ from .. import gene, go, taxonomy
 from ..utils import serverfiles
 from ..utils import stats
 from ..widgets.utils.download import EnsureDownloaded
+from . import utils
 
 
 def isstring(var):
@@ -440,7 +441,7 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
             genes = [v.name for v in data.domain.variables]
         else:
             attr = self.candidateGeneAttrs[min(self.geneAttrIndex, len(self.candidateGeneAttrs) - 1)]
-            genes = [str(ex[attr]) for ex in data if not numpy.isnan(ex[attr])]
+            genes = utils.gene_names_from_column(data, attr)
             if any("," in gene for gene in genes):
                 self.information(0, "Separators detected in gene names. Assuming multiple genes per example.")
                 genes = reduce(operator.iadd, (genes.split(",") for genes in genes), [])
@@ -553,8 +554,7 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
             self.information(0)
         elif 0 <= self.geneAttrIndex < len(self.candidateGeneAttrs):
             geneAttr = self.candidateGeneAttrs[self.geneAttrIndex]
-            clusterGenes = [str(ex[geneAttr]) for ex in self.clusterDataset
-                            if not numpy.isnan(ex[geneAttr])]
+            clusterGenes = utils.gene_names_from_column(self.clusterGenes, geneAttr)
             if any("," in gene for gene in clusterGenes):
                 self.information(0, "Separators detected in cluster gene names. Assuming multiple genes per example.")
                 clusterGenes = reduce(operator.iadd, (genes.split(",") for genes in clusterGenes), [])
@@ -582,8 +582,7 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
                 self.information(1)
             elif geneAttr in (self.referenceDataset.domain.variables +
                               self.referenceDataset.domain.metas):
-                referenceGenes = [str(ex[geneAttr]) for ex in self.referenceDataset
-                                  if not numpy.isnan(ex[geneAttr])]
+                referenceGenes = utils.gene_names_from_column(self.referenceDataset, geneAttr)
                 if any("," in gene for gene in clusterGenes):
                     self.information(1, "Separators detected in reference gene names. Assuming multiple genes per example.")
                     referenceGenes = reduce(operator.iadd, (genes.split(",") for genes in referenceGenes), [])
@@ -878,8 +877,10 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
                     self.clusterDataset.domain.variables, goVar,
                     self.clusterDataset.domain.metas)
                 goColumn = []
-            for i, ex in enumerate(self.clusterDataset):
-                if not numpy.isnan(ex[geneAttr]) and any(gene in selectedGenes for gene in str(ex[geneAttr]).split(",")):
+            mask = utils.isunknown(
+                geneAttr, self.clusterDataset.get_column_view(geneAttr)[0])
+            for i, (ex, unknown) in enumerate(zip(self.clusterDataset, mask)):
+                if not unknown and any(gene in selectedGenes for gene in str(ex[geneAttr]).split(",")):
                     if self.selectionDisjoint == 1 and self.selectionAddTermAsClass:
                         terms = filter(lambda term: any(gene in self.graph[term][0] for gene in str(ex[geneAttr]).split(",")) , self.selectedTerms)
                         term = sorted(terms)[0]

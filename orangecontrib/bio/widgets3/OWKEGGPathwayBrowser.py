@@ -756,8 +756,8 @@ class OWKEGGPathwayBrowser(widget.OWWidget):
         elif self.geneAttrCandidates:
             assert 0 <= self.geneAttrIndex < len(self.geneAttrCandidates)
             geneAttr = self.geneAttrCandidates[self.geneAttrIndex]
-            genes = [str(e[geneAttr]) for e in data
-                     if not numpy.isnan(e[geneAttr])]
+            genes = [str(e[geneAttr]) for e in data]
+            genes = [gene for gene in genes if gene]
         else:
             raise ValueError("No gene names in data.")
         return genes

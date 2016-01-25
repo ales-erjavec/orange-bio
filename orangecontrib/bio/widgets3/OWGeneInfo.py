@@ -11,6 +11,8 @@ from itertools import chain
 from collections import defaultdict
 from functools import partial, lru_cache
 
+import numpy
+
 from PyQt4.QtGui import (
     QTreeView, QItemSelection, QItemSelectionModel, QFont, QColor,
     QApplication, QMessageBox, QDesktopServices, QSortFilterProxyModel
@@ -24,6 +26,7 @@ from PyQt4.QtCore import pyqtSlot as Slot
 import Orange
 
 from orangecontrib.bio.utils import serverfiles
+from . import utils
 
 from Orange.widgets.utils.datacaching import data_hints
 from Orange.widgets import widget, gui, settings
@@ -379,8 +382,7 @@ class OWGeneInfo(widget.OWWidget):
             self.geneAttrComboBox.clear()
             self.attributes = \
                 [attr for attr in data.domain.variables + data.domain.metas
-                 if isinstance(attr, (Orange.data.StringVariable,
-                                      Orange.data.DiscreteVariable))]
+                 if attr.is_string]
 
             for var in self.attributes:
                 self.geneAttrComboBox.addItem(*gui.attributeItem(var))
@@ -418,8 +420,8 @@ class OWGeneInfo(widget.OWWidget):
             genes = [attr.name for attr in self.data.domain.attributes]
         elif self.attributes:
             attr = self.attributes[self.gene_attr]
-            genes = [str(ex[attr]) for ex in self.data
-                     if not math.isnan(ex[attr])]
+            assert attr.is_string
+            genes = utils.gene_names_from_column(self.data, attr)
         else:
             genes = []
         return genes
@@ -434,8 +436,8 @@ class OWGeneInfo(widget.OWWidget):
             genes = [attr.name for attr in self.data.domain.attributes]
         elif self.attributes:
             attr = self.attributes[self.gene_attr]
-            genes = [str(ex[attr]) for ex in self.data
-                     if not math.isnan(ex[attr])]
+            assert attr.is_string
+            genes = utils.gene_names_from_column(self.data, attr)
         else:
             genes = []
         if not genes:

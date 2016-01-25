@@ -563,8 +563,8 @@ class OWSelectGenes(widget.OWWidget):
             var = self.subsetGeneVar
             if var is not None:
                 assert isinstance(var, Orange.data.StringVariable)
-                values = [inst[var] for inst in self.subsetData]
-                selection = [str(val) for val in values if not math.isnan(val)]
+                values = [str(inst[var]) for inst in self.subsetData]
+                selection = [val for val in values if val]
         else:
             selection = self.selection
         return selection

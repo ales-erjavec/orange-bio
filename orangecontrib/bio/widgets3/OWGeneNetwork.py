@@ -16,7 +16,8 @@ from Orange.widgets.utils.concurrent import ThreadExecutor, Task, methodinvoke
 from orangecontrib import network
 
 from .. import ppi, taxonomy, gene
-from ..utils import serverfiles, compat
+from ..utils import serverfiles
+from . import utils
 
 
 Source = namedtuple(
@@ -157,9 +158,9 @@ class OWGeneNetwork(widget.OWWidget):
                 return []
         elif self.gene_var_index >= 0:
             var = self.varmodel[self.gene_var_index]
-            genes = [str(inst[var]) for inst in self.data
-                     if not compat.isunknown(inst[var])]
-            return list(unique(genes))
+            assert var.is_string
+            genes = utils.gene_names_from_column(self.data, var)
+            return list(unique(map(str, genes)))
         else:
             return []
 
