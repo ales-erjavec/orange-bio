@@ -1,20 +1,16 @@
 import sys
 import os
-import io
 import glob
-import tempfile
 
 from collections import defaultdict
 from functools import partial
 
 if sys.version_info < (3, ):
     import urllib2 as urlrequest
-    import urlparse as urlparse
     from Orange.utils import lru_cache
     str = unicode
 else:
     import urllib.request as urlrequest
-    import urllib.parse as urlparse
     from functools import lru_cache
     unicode = str
 
@@ -54,6 +50,7 @@ else:
     qunpack = lambda obj: obj
 
 from orangecontrib.bio.utils import serverfiles
+from orangecontrib.bio import utils
 from orangecontrib.bio import geo
 
 NAME = "GEO Data Sets"
@@ -731,21 +728,6 @@ def get_gds_model(progress=lambda val: None):
 
 GDS_CACHE_DIR = serverfiles.localpath(geo.DOMAIN)
 
-
-if sys.version_info >= (3, 4):
-    _os_replace = os.replace
-else:
-    if os.name != "posix":
-        def _os_replace(src, dst):
-            try:
-                os.rename(src, dst)
-            except FileExistsError:
-                os.remove(dst)
-                os.rename(src)
-    else:
-        _os_replace = os.rename
-
-
 def gds_is_cached(gdsname):
     return os.path.isfile(
         os.path.join(GDS_CACHE_DIR, gdsname + ".soft.gz"))
@@ -768,93 +750,12 @@ def gds_download(gdsname, progress=None):
     gdsurl = gds_download_url(gdsname)
     basename = gdsname + ".soft.gz"
     targetpath = os.path.join(GDS_CACHE_DIR, basename)
-    temp = tempfile.NamedTemporaryFile(
-       prefix=basename + "-", dir=GDS_CACHE_DIR, delete=False)
-    try:
-        retrieve_url(gdsurl, temp, progress=progress)
-    except BaseException as err:
-        try:
-            temp.close()
-            os.remove(temp.name)
-        except (OSError, IOError):
-            pass
-        raise err
-    else:
-        temp.close()
-        _os_replace(temp.name, targetpath)
+    utils.download_url(gdsurl, targetpath, progress=progress)
 
 
 def gds_download_url(gdsname):
     """Return the download url for a GDS id `gdsname`."""
     return "ftp://{}/{}/{}.soft.gz".format(geo.FTP_NCBI, geo.FTP_DIR, gdsname)
-
-
-def retrieve_url(url, dstobj, progress=None):
-    """
-    Retrieve an `url` writing it to an open file-like `destobj`.
-
-    Parameters
-    ----------
-    url : str
-        The source url.
-    destobj : file-like object
-        An file-like object opened for writing.
-    progress : (int, int) -> None optional
-        An optional progress callback function. Will be called
-        periodically with `(transfered, total)` bytes count. `total`
-        can be `-1` if the total contents size cannot be
-        determined beforehand.
-    """
-    with urlrequest.urlopen(url, timeout=10) as stream:
-        length = stream.headers.get("content-length", None)
-        if length is not None:
-            length = int(length)
-        copyfileobj(stream, dstobj, size=length, progress=progress)
-
-
-def copyfileobj(src, dst, buffer=2 ** 15, size=None, progress=None):
-    """
-    Like shutil.copyfileobj but with progress reporting.
-
-    Parameters
-    ----------
-    src : file-like object
-        Source file object
-    dst : file-like object
-        Destination file object
-    buffer : buffer size
-        Buffer size
-    size : int optional
-        Total `src` contents size if available.
-    progress : (int, int) -> None
-        An optional progress callback function. Will be called
-        periodically with `(transfered, total)` bytes count. `total`
-        can be `-1` if the total contents size cannot be
-        determined beforehand.
-    """
-    count = 0
-    if size is None:
-        size = sniff_size(src)
-
-    while True:
-        data = src.read(buffer)
-        dst.write(data)
-        count += len(data)
-        if progress is not None:
-            progress(count, size if size is not None else -1)
-        if not data:
-            break
-
-    if size is None:
-        progress(count, count)
-
-    return count
-
-
-def sniff_size(fileobj):
-    if isinstance(fileobj, io.FileIO):
-        return os.fstat(fileobj.fileno()).st_size
-    return None
 
 
 def main_test():
