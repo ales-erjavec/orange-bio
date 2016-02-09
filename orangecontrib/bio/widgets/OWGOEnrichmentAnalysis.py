@@ -388,52 +388,6 @@ class OWGOEnrichmentAnalysis(OWWidget):
         self.geneAttrIndexCombo.clear()
         self.geneAttrIndexCombo.addItems([a.name for a in  self.candidateGeneAttrs])
 
-    def FindBestGeneAttrAndOrganism(self):
-        if self.autoFindBestOrg:  
-            organismGenes = dict([(o,set(go.getCachedGeneNames(o))) for o in self.annotationCodes])
-        else:
-            currCode = self.annotationCodes[min(self.annotationIndex, len(self.annotationCodes)-1)]
-            filename = p_join(dataDir, self.annotationFiles[currCode])
-            try:
-                f = tarfile.open(filename)
-                info = [info for info in f.getmembers() if info.name.startswith("gene_names")].pop()
-                geneNames = cPickle.loads(f.extractfile(info).read().replace("\r\n", "\n"))
-            except Exception, ex:
-                geneNames = cPickle.loads(open(p_join(filename, "gene_names.pickle")).read().replace("\r\n", "\n"))
-            organismGenes = {currCode: set(geneNames)}
-        candidateGeneAttrs = self.clusterDataset.domain.attributes + self.clusterDataset.domain.getmetas().values()
-        candidateGeneAttrs = filter(lambda v: v.varType in [orange.VarTypes.String, 
-                                                            orange.VarTypes.Other, 
-                                                            orange.VarTypes.Discrete], 
-                                    candidateGeneAttrs)
-        attrNames = [v.name for v in self.clusterDataset.domain.variables]
-        cn = {}
-        for attr in candidateGeneAttrs:
-            vals = [str(e[attr]) for e in self.clusterDataset]
-            if any("," in val for val in vals):
-                vals = reduce(list.__add__, (val.split(",") for val in vals))
-            for organism, s in organismGenes.items():
-                l = filter(lambda a: a in s, vals)
-                cn[(attr,organism)] = len(set(l))
-        for organism, s in organismGenes.items():
-            l = filter(lambda a: a in s, attrNames)
-            cn[("_var_names_", organism)] = len(set(l))
-            
-        cn = cn.items()
-        cn.sort(lambda a,b:-cmp(a[1],b[1]))
-        ((bestAttr, organism), count) = cn[0]
-        if bestAttr=="_var_names_" and count<=len(attrNames)/10.0 or \
-           bestAttr!="_var_names_" and count<=len(self.clusterDataset)/10.0:
-            return
-        
-        self.annotationIndex = self.annotationCodes.index(organism)
-        if bestAttr=="_var_names_":
-            self.useAttrNames = True
-            self.geneAttrIndex = 0
-        else:
-            self.useAttrNames = False
-            self.geneAttrIndex = candidateGeneAttrs.index(bestAttr)
-
     def SetClusterDataset(self, data=None):
         if not self.annotationCodes:
             QTimer.singleShot(200, lambda: self.SetClusterDataset(data))

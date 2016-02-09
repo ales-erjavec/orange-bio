@@ -4,13 +4,20 @@ Gene Ontology (:mod:`go`)
 
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import os
 import tarfile
 import gzip
 import re
 import sys
+import shutil
+import warnings
+
+from collections import defaultdict
+from operator import attrgetter
+from contextlib import closing
+
 import six
 
 try:
@@ -18,19 +25,13 @@ try:
 except ImportError:
     import pickle
 
-import shutil
-
 try:
     from urllib2 import urlopen
 except ImportError:
     from urllib.request import urlopen
-    
-import warnings
 
-from gzip import GzipFile
-from collections import defaultdict
-from operator import attrgetter
 
+from orangecontrib.bio import utils
 from orangecontrib.bio.utils import progress_bar_milestones
 
 try:
@@ -38,17 +39,13 @@ try:
 except ImportError:
     from orangecontrib.bio.utils import environ
 
-try:
-    basestring
-    intern
-except NameError:
-    basestring = str
+if six.PY3:
     intern = sys.intern
 
 from orangecontrib.bio.utils import serverfiles
 from orangecontrib.bio.utils import stats
 
-from orangecontrib.bio import gene as obiGene, taxonomy as obiTaxonomy
+from orangecontrib.bio import gene as obiGene, taxonomy
 
 default_database_path = os.path.join(serverfiles.localpath(), "GO")
 
@@ -289,6 +286,8 @@ class Ontology(object):
     """
     version = 1
 
+    DOMAIN, FILENAME = "GO", "gene_ontology_edit.obo"
+
     def __init__(self, filename=None, progress_callback=None, rev=None):
         self.terms = {}
         self.typedefs = {}
@@ -316,8 +315,7 @@ class Ontology(object):
                             if progress_callback else None)
         else:
             filename = serverfiles.localpath_download(
-                "GO", "gene_ontology_edit.obo.tar.gz"
-            )
+                Ontology.DOMAIN, Ontology.FILENAME)
             self.parse_file(filename, progress_callback)
 
     @classmethod
@@ -327,11 +325,8 @@ class Ontology(object):
         'gene_ontology'. If not found it will download it.
 
         """
-        filename = os.path.join(default_database_path,
-                                "gene_ontology_edit.obo.tar.gz")
-        if not os.path.isfile(filename) and not os.path.isdir(filename):
-            serverfiles.download("GO", "gene_ontology_edit.obo.tar.gz")
-
+        filename = serverfiles.localpath_download(
+            Ontology.DOMAIN, Ontology.FILENAME)
         return cls(filename, progress_callback=progress_callback)
 
     Load = load
@@ -341,7 +336,7 @@ class Ontology(object):
         object. The optional progressCallback will be called with a single
         argument to report on the progress.
         """
-        if isinstance(file, basestring):
+        if isinstance(file, six.string_types):
             if os.path.isfile(file) and tarfile.is_tarfile(file):
                 f = tarfile.open(file).extractfile("gene_ontology_edit.obo")
             elif os.path.isfile(file):
@@ -421,7 +416,7 @@ class Ontology(object):
         to ``ont.set_slims_subsets(ont.named_slims_subset(subset))``
 
         """
-        if isinstance(subset, basestring):
+        if isinstance(subset, six.string_types):
             self.slims_subset = set(self.named_slims_subset(subset))
         else:
             self.slims_subset = set(subset)
@@ -455,7 +450,7 @@ class Ontology(object):
         :param list terms: A list of term IDs.
 
         """
-        terms = [terms] if isinstance(terms, basestring) else terms
+        terms = [terms] if isinstance(terms, six.string_types) else terms
         visited = set()
         queue = set(terms)
         while queue:
@@ -529,22 +524,96 @@ class Ontology(object):
         return termid in self.terms or termid in self.alias_mapper
 
     @staticmethod
+    def download(file_or_path, download_progress=None):
+        """
+        Download the current gene ontology file (obo format).
+
+        Parameters
+        ----------
+        file_or_path : file-like or str
+            An file-like object opened in "wb" mode or a local filesystem
+            path naming the location where the file should be stored.
+            If path names a directory AND ends with a directory separator
+            ('/') a default named file in that directory will be created.
+        download_progress : (int, int) -> None, optional
+            A download report callback. Will be called with
+            (transferred, total) where transferred is the number of bytes
+            transferred and total the total file size in bytes or -1 if
+            unavailable.
+        """
+        filename = "gene_ontology_edit.obo"
+        if isinstance(file_or_path, six.string_types):
+            if utils.isdirname(file_or_path) and os.path.isdir(file_or_path):
+                localpath = os.path.join(file_or_path, filename)
+            else:
+                localpath = file_or_path
+        else:
+            localpath = None
+        url = "http://www.geneontology.org/ontology/gene_ontology_edit.obo"
+        with closing(urlopen(url)) as stream:
+            if localpath is None:
+                utils.copyfileobj(stream, file_or_path,
+                                  progress=download_progress)
+            else:
+                with open(localpath + "-part", "wb") as fileobj:
+                    utils.copyfileobj(stream, fileobj,
+                                      progress=download_progress)
+                utils.replace(localpath + "-part", localpath)
+
+    @staticmethod
+    def download_at_rev(file_or_path, rev, download_progress=None):
+        """
+        Download the gene ontology file (obo format) at specified CVS revision.
+
+        See http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/go/
+
+        Parameters
+        ----------
+        file_or_path : file-like or str
+            An file-like object opened in "wb" mode or a local filesystem
+            path naming the location where the file should be stored.
+            If path names a directory AND ends with a directory separator
+            ('/') a default named file in that directory will be created.
+        rev : str
+            A CVS revision string.
+        download_progress : (int, int) -> None, optional
+            A download report callback. Will be called with
+            (transferred, total) where transferred is the number of bytes
+            transferred and total the total file size in bytes or -1 if
+            unavailable.
+        """
+        filename = "gene_ontology_edit@rev{}.obo".format(rev)
+        if isinstance(file_or_path, six.string_types):
+            if utils.isdirname(file_or_path) and os.path.isdir(file_or_path):
+                localpath = os.path.join(file_or_path, filename)
+            else:
+                localpath = file_or_path
+        else:
+            localpath = None
+        url = ("http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/~checkout~/"
+               "go/ontology/gene_ontology_edit.obo?rev={}".format(rev))
+        url += ";content-type=text%2Fplain"
+        with closing(urlopen(url)) as stream:
+            if localpath is None:
+                utils.copyfileobj(stream, file_or_path,
+                                  progress=download_progress)
+            else:
+                with open(localpath + "-part", "wb") as fileobj:
+                    utils.copyfileobj(stream, fileobj,
+                                      progress=download_progress)
+                utils.replace(localpath + "-part", localpath)
+
+    @staticmethod
     def download_ontology(file, progress_callback=None):
-        tFile = tarfile.open(file, "w:gz") if isinstance(file, basestring) \
+        warnings.warn("Deprecated", DeprecationWarning)
+        tFile = tarfile.open(file, "w:gz") if isinstance(file, six.string_types) \
                 else file
         tmpDir = os.path.join(environ.buffer_dir, "tmp_go/")
-        try:
-            os.mkdir(tmpDir)
-        except Exception:
-            pass
+        utils.makedirs(tmpDir, exist_ok=True)
+        localpath = os.path.join(tmpDir, "gene_ontology_edit.obo")
 
-        from Orange.utils import wget
-        wget("http://www.geneontology.org/ontology/gene_ontology_edit.obo",
-             tmpDir,
-             progress=progress_callback)
-
-        tFile.add(os.path.join(tmpDir, "gene_ontology_edit.obo"),
-                  "gene_ontology_edit.obo")
+        Ontology.download(localpath)
+        tFile.add(localpath, "gene_ontology_edit.obo")
         tFile.close()
         os.remove(os.path.join(tmpDir, "gene_ontology_edit.obo"))
 
@@ -552,17 +621,11 @@ class Ontology(object):
 
     @staticmethod
     def download_ontology_at_rev(rev, filename=None, progress_callback=None):
-        url = "http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/~checkout~/go/ontology/gene_ontology_edit.obo?rev=%s" % rev
-        url += ";content-type=text%2Fplain"
+        warnings.warn("Deprecated", DeprecationWarning)
         if filename is None:
             filename = os.path.join(default_database_path,
                                     "gene_ontology_edit@rev%s.obo" % rev)
-        r = urlopen(url)
-
-        with open(filename + ".part", "wb") as f:
-            shutil.copyfileobj(r, f)
-
-        os.rename(filename + ".part", filename)
+        Ontology.download_at_rev(filename, rev)
 
     DownloadOntologyAtRev = download_ontology_at_rev
 
@@ -584,7 +647,7 @@ class AnnotationRecord(_AnnotationRecordBase):
 
     """
     def __new__(cls, *args):
-        if len(args) == 1 and isinstance(args[0], basestring):
+        if len(args) == 1 and isinstance(args[0], six.string_types):
             args = map(intern, args[0].split("\t"))
         return super(AnnotationRecord, cls).__new__(cls, *args)
 
@@ -640,7 +703,7 @@ class Annotations(object):
         <http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/go/gene-associations/>`_)
 
     """
-    version = 2
+    version = 3
 
     def __init__(self, filename_or_organism=None, ontology=None, genematcher=None,
                  progress_callback=None, rev=None):
@@ -672,11 +735,11 @@ class Annotations(object):
             if type(filename_or_organism, Annotations):
                 self.taxid = filename_or_organism.taxid
 
-        elif isinstance(filename_or_organism, basestring) and \
+        elif isinstance(filename_or_organism, six.string_types) and \
                 os.path.exists(filename_or_organism):
             self.parse_file(filename_or_organism, progress_callback)
 
-        elif isinstance(filename_or_organism, basestring):
+        elif isinstance(filename_or_organism, six.string_types):
             # Assuming organism code/name
             if rev is not None:
                 if not _CVS_REVISION_RE.match(rev):
@@ -718,25 +781,24 @@ class Annotations(object):
     @classmethod
     def organism_name_search(cls, org):
         ids = to_taxid(org)
-        from orangecontrib.bio import taxonomy as tax
         if not ids:
             ids = [org] if org in Taxonomy().common_org_map or \
                 org in Taxonomy().code_map.keys() else []
         if not ids:
-            ids = tax.to_taxid(org, mapTo=Taxonomy().keys())
+            ids = taxonomy.to_taxid(org, mapTo=Taxonomy().keys())
         if not ids:
-            ids = tax.search(org, exact=True)
+            ids = taxonomy.search(org, exact=True)
             ids = set(ids).intersection(Taxonomy().keys())
         if not ids:
-            ids = tax.search(org)
+            ids = taxonomy.search(org)
             ids = set(ids).intersection(Taxonomy().keys())
         codes = set([from_taxid(id) for id in ids])
         if len(codes) > 1:
-            raise tax.MultipleSpeciesException(
-                ", ".join(["%s: %s" % (str(from_taxid(id)), tax.name(id))
+            raise taxonomy.MultipleSpeciesException(
+                ", ".join(["%s: %s" % (str(from_taxid(id)), taxonomy.name(id))
                            for id in ids]))
         elif len(codes) == 0:
-            raise tax.UnknownSpeciesIdentifier(org)
+            raise taxonomy.UnknownSpeciesIdentifier(org)
         return codes.pop()
 
     @classmethod
@@ -771,16 +833,21 @@ class Annotations(object):
         """
         code = organism_name_search(org)
 
-        filename = "gene_association.%s.tar.gz" % code
+        filename = "gene_association." + code
+        filename_gz = filename + ".gz"
+        filename_tgz = "gene_association.%s.tar.gz" % code
 
         path = serverfiles.localpath("GO", filename)
 
         if not os.path.exists(path):
             sf = serverfiles.ServerFiles()
             available = sf.listfiles("GO")
-            if filename not in available:
-                raise obiTaxonomy.UnknownSpeciesIdentifier(org + str(code))
-            serverfiles.download("GO", filename)
+            if filename in available:
+                path = serverfiles.localpath_download("GO", filename)
+            elif filename_tgz in available:
+                path = serverfiles.localpath_download("GO", filename_tgz)
+            else:
+                raise taxonomy.UnknownSpeciesIdentifier(org + str(code))
 
         return cls(path, ontology=ontology, genematcher=genematcher,
                    progress_callback=progress_callback)
@@ -798,7 +865,7 @@ class Annotations(object):
             - an open file-like object of the association file
 
         """
-        if isinstance(file, basestring):
+        if isinstance(file, six.string_types):
             if os.path.isfile(file) and tarfile.is_tarfile(file):
                 f = tarfile.open(file).extractfile("gene_association")
             elif os.path.isfile(file) and file.endswith(".gz"):
@@ -967,7 +1034,7 @@ class Annotations(object):
 
         if aspect == None:
             aspects_set = set(["P", "C", "F"])
-        elif isinstance(aspect, basestring):
+        elif isinstance(aspect, six.string_types):
             aspects_set = set([aspect])
         else:
             aspects_set = aspect
@@ -1148,36 +1215,140 @@ class Annotations(object):
     RemapGenes = remap_genes
 
     @staticmethod
+    def download(org, file_or_path, download_progress=None):
+        """
+        Download the current associations for 'org' from www.geneontology.com
+
+        Note: The file will be a gzip compressed file
+
+        Parameters
+        ----------
+        org : str
+            An organism code (e.g. 'sgd', 'dictyBase')
+        file_or_path : str or file-like
+            An file-like object opened in "wb" mode or a local filesystem
+            path naming the location where the annotations should be stored.
+            If path names a directory AND ends with a directory separator
+            ('/') a default named file in that directory will be created.
+        download_progress : (int, int) -> None, optional
+            A download report callback. will be called with
+            (transferred, total) where transferred is the number of bytes
+            transferred and total the total file size in bytes or -1 if
+            unavailable.
+        """
+        filename = "gene_association." + org
+        filename_gz = filename + ".gz"
+
+        if isinstance(file_or_path, six.string_types):
+            if utils.isdirname(file_or_path) and os.path.isdir(file_or_path):
+                localpath = os.path.join(file_or_path, filename_gz)
+            else:
+                localpath = file_or_path
+        else:
+            localpath = None
+
+        url = "http://www.geneontology.org/gene-associations/" + filename_gz
+        with closing(urlopen(url)) as stream:
+            if localpath is None:
+                utils.copyfileobj(stream, file_or_path,
+                                  progress=download_progress)
+            else:
+                with open(localpath + "-part", "wb") as fileobj:
+                    utils.copyfileobj(stream, fileobj,
+                                      progress=download_progress)
+                utils.replace(localpath + "-part", localpath)
+
+    @staticmethod
+    def download_at_rev(org, rev, file_or_path, download_progress=None):
+        """
+        Download associations for 'org' from www.geneontology.com at CVS rev.
+
+        Note: The file will be a gzip compressed file
+
+        See http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/go/
+
+        Parameters
+        ----------
+        org : str
+            An organism code (e.g. 'sgd', 'dictyBase', 'goa_human', ...)
+        rev : str
+            A CVS revision tag (e.g. "1.42")
+        file_or_path : str or file-like
+            An file-like object opened in "wb" mode or a local filesystem
+            path naming the location where the annotations should be stored.
+            If path names a directory AND ends with a directory separator
+            ('/') a default named file in that directory will be created.
+        download_progress : (int, int) -> None, optional
+            A download report callback. will be called with
+            (transferred, total) where transferred is the number of bytes
+            transferred and total the total file size in bytes or -1 if
+            unavailable.
+        """
+        filename = "gene_association.{}@rev{}".format(org, rev)
+        filename_gz = filename + ".gz"
+
+        if isinstance(file_or_path, six.string_types):
+            if utils.isdirname(file_or_path) and os.path.isdir(file_or_path):
+                localpath = os.path.join(file_or_path, filename_gz)
+            else:
+                localpath = file_or_path
+        else:
+            localpath = None
+
+        url = ("http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/~checkout~/"
+               "go/gene-associations/gene_association.{}.gz?rev={}"
+               .format(org, rev))
+        url += ";content-type=application%2Fx-gzip"
+        with closing(urlopen(url)) as stream:
+            if localpath is None:
+                utils.copyfileobj(stream, file_or_path,
+                                  progress=download_progress)
+            else:
+                with open(localpath + "-part", "wb") as fileobj:
+                    utils.copyfileobj(stream, fileobj,
+                                      progress=download_progress)
+                utils.replace(localpath + "-part", localpath)
+
+    @staticmethod
     def download_annotations(org, file, progress_callback=None):
-        if isinstance(file, basestring):
+        warnings.warn("Deprecated", DeprecationWarning)
+        if isinstance(file, six.string_types):
             tFile = tarfile.open(file, "w:gz")
         else:
             tFile = file
 
         tmpDir = os.path.join(environ.buffer_dir, "tmp_go/")
-        try:
-            os.mkdir(tmpDir)
-        except Exception:
-            pass
-        fileName = "gene_association." + org + ".gz"
+        utils.makedirs(tmpDir, exist_ok=True)
 
-        from Orange.utils import wget
-        wget("http://www.geneontology.org/gene-associations/" + fileName,
-             directory=tmpDir,
-             progress=progress_callback)
+        filename = "gene_association." + org
+        localpath = os.path.join(tmpDir, filename)
+        filename_gz = filename + ".gz"
 
-        gzFile = GzipFile(os.path.join(tmpDir, fileName), "r")
-        file = open(os.path.join(tmpDir, "gene_association." + org), "w")
-        file.writelines(gzFile.readlines())
-        file.flush()
-        file.close()
+        if progress_callback is not None:
+            def progress(transfered, total):
+                if total > 0:
+                    progress_callback(100.0 * transfered / total)
+                else:
+                    progress_callback(100.0 * transfered / sys.maxsize)
+        else:
+            progress = None
 
-        tFile.add(os.path.join(tmpDir, "gene_association." + org),
-                  "gene_association")
-        annotation = Annotations(os.path.join(tmpDir, "gene_association." + org),
-                    genematcher=obiGene.GMDirect(), progress_callback=progress_callback)
-        pickle.dump(annotation.gene_names, open(os.path.join(tmpDir, "gene_names.pickle"), "wb"))
-        tFile.add(os.path.join(tmpDir, "gene_names.pickle"), "gene_names.pickle")
+        Annotations.download(org, os.path.join(tmpDir, filename_gz),
+                             download_progress=progress)
+
+        with gzip.open(localpath + ".gz", "rb") as file_gz:
+            with open(localpath, "wb") as f:
+                utils.copyfileobj(file_gz, f)
+
+        tFile.add(localpath, "gene_association")
+        annotation = Annotations(localpath,
+                                 genematcher=obiGene.GMDirect(),
+                                 progress_callback=progress_callback)
+        with open(os.path.join(tmpDir, "gene_names.pickle"), "wb") as f:
+            pickle.dump(annotation.gene_names, f)
+
+        tFile.add(os.path.join(tmpDir, "gene_names.pickle"),
+                  "gene_names.pickle")
         tFile.close()
         os.remove(os.path.join(tmpDir, "gene_association." + org))
         os.remove(os.path.join(tmpDir, "gene_names.pickle"))
@@ -1187,29 +1358,24 @@ class Annotations(object):
     @staticmethod
     def download_annotations_at_rev(org, rev, filename=None,
                                     progress_callback=None):
+        warnings.warn("Deprecated", DeprecationWarning)
         if filename is None:
-            filename = os.path.join(default_database_path,
-                                    "gene_association.%s@rev%s.tar.gz" %
-                                    (code, rev))
-        url = ("http://cvsweb.geneontology.org/cgi-bin/cvsweb.cgi/~checkout~/go/gene-associations/gene_association.%s.gz?rev=%s" %
-               (org, rev))
-        url += ";content-type=application%2Fx-gzip"
-        r = urlopen(url)
-
-        with open(filename + ".part", "wb") as f:
-            shutil.copyfileobj(r, f)
-
-        os.rename(filename + ".part", filename)
+            filename = os.path.join(
+                default_database_path,
+                "gene_association.%s@rev%s.tar.gz" % (org, rev)
+            )
+        if progress_callback is not None:
+            def progress(transfered, total):
+                if total > 0:
+                    progress_callback(100.0 * transfered / total)
+                else:
+                    progress_callback(100.0 * transfered / sys.maxsize)
+        else:
+            progress = None
+        Annotations.download_at_rev(org, rev, filename,
+                                    download_progress=progress)
 
     DownloadAnnotationsAtRev = download_annotations_at_rev
-
-from orangecontrib.bio.taxonomy import pickled_cache
-
-
-@pickled_cache(None, [("GO", "taxonomy.pickle"),
-                      ("Taxonomy", "ncbi_taxonomy.tar.gz")])
-def organism_name_search(name):
-    return Annotations.organism_name_search(name)
 
 
 def filter_by_p_value(terms, p_value=0.01):
@@ -1244,7 +1410,7 @@ filterByRefFrequency = filter_by_ref_frequency
 
 def draw_enrichment_graph(enriched, file="graph.png", width=None, height=None,
                           header=None, ontology=None, precison=3):
-    file = open(file, "wb") if type(file) == str else file
+    file = open(file, "wb") if isinstance(file, six.string_types) else file
     _draw_enrichment_graph_tostream(enriched, file, width, height, header,
                                     ontology, precison)
 
@@ -1489,10 +1655,12 @@ class Taxonomy(object):
                 "31033": None,  # Takifugu rubripes
                 "8355": None,  # Xenopus laevis
                 "4577": None,  # Zea mays
-                "5476": "cgd",
+                "5476": "cgd", # Candida albicans
                 }
     version = 1
     __shared_state = {"tax": None}
+
+    DOMAIN, FILENAME = "GO", "taxonomy.pickle"
 
     def __init__(self):
         self.__dict__ = self.__shared_state
@@ -1510,6 +1678,13 @@ class Taxonomy(object):
 
     def keys(self):
         return list(set(list(self.common_org_map.keys()) + list(self.code_map.keys())))
+
+
+@taxonomy.pickled_cache(
+    None, [(Taxonomy.DOMAIN, Taxonomy.FILENAME),
+            (taxonomy.Taxonomy.DOMAIN, taxonomy.Taxonomy.FILENAME)])
+def organism_name_search(name):
+    return Annotations.organism_name_search(name)
 
 
 def from_taxid(id):
@@ -1539,7 +1714,8 @@ def _test2():
     terms = a.get_enriched_terms(clusterGenes, aspect=["P"])
     a.get_annotated_terms(clusterGenes)
 
-    a.draw_enrichment_graph(filterByPValue(terms), len(clusterGenes), len(a.gene_names))
+    a.draw_enrichment_graph(filterByPValue(terms, p_value=0.8),
+                            len(clusterGenes), len(a.gene_names))
 
 
 def _test3():
@@ -1553,7 +1729,7 @@ def _test3():
 
     print(terms)
 
-    a.draw_enrichment_graph(filterByPValue(terms, maxPValue=0.1), len(clusterGenes), len(a.gene_names))
+    a.draw_enrichment_graph(filterByPValue(terms, p_value=0.8), len(clusterGenes), len(a.gene_names))
 
 if __name__ == "__main__":
     _test2()
