@@ -48,25 +48,20 @@ def listAvailable():
     ret = {}
     for file in files:
         tags = orngServerFiles.info("GO", file)["tags"]
-        td = dict([tuple(tag.split(":")) for tag in tags if tag.startswith("#") and ":" in tag])
-        if "association" in file.lower():
+        td = dict([tuple(tag.split(":", 1)) for tag in tags
+                   if tag.startswith("#") and ":" in tag])
+        if "association" in file.lower() and \
+                td.get("#version", None) == obiGO.Annotations.version:
             ret[td.get("#organism", file)] = file
-    orgMap = {"352472":"44689"}
-    essential = ["gene_association.%s.tar.gz" % obiGO.from_taxid(id) for id in obiTaxonomy.essential_taxids() if obiGO.from_taxid(id)]
-    essentialNames = [obiTaxonomy.name(id) for id in obiTaxonomy.essential_taxids() if obiGO.from_taxid(id)]
+    essential = ["gene_association.%s" % obiGO.from_taxid(id)
+                 for id in obiTaxonomy.essential_taxids()
+                 if obiGO.from_taxid(id)]
+    essentialNames = [obiTaxonomy.name(id)
+                      for id in obiTaxonomy.essential_taxids()
+                      if obiGO.from_taxid(id)]
     ret.update(zip(essentialNames, essential))
     return ret
 
-class _disablegc(object):
-    def __enter__(self):
-        gc.disable()
-    def __exit__(self, *args):
-        gc.enable()
-
-def getOrgFileName(org):
-    from Orange.orng import orngServerFiles
-    files = orngServerFiles.listfiles("go")
-    return [f for f in files if org in f].pop()
 
 class TreeNode(object):
     def __init__(self, tuple, children):
@@ -400,7 +395,7 @@ class OWGOEnrichmentAnalysis(OWWidget):
             try:
                 taxid = data_hints.get_hint(data, "taxid", "")
                 code = obiGO.from_taxid(taxid)
-                filename = "gene_association.%s.tar.gz" % code
+                filename = "gene_association.%s" % code
                 if filename in self.annotationFiles.values():
                     self.annotationIndex = \
                             [i for i, name in enumerate(self.annotationCodes) \
@@ -472,12 +467,14 @@ class OWGOEnrichmentAnalysis(OWWidget):
             self.send("Example With Unknown Genes", None)
 
     def Load(self, pb=None):
-        go_files, tax_files = orngServerFiles.listfiles("GO"), orngServerFiles.listfiles("Taxonomy")
+        go_files = orngServerFiles.listfiles("GO")
+        tax_files = orngServerFiles.listfiles("Taxonomy")
         calls = []
         pb, finish = (OWGUI.ProgressBar(self, 0), True) if pb is None else (pb, False)
         count = 0
         if not tax_files:
-            calls.append(("Taxonomy", "ncbi_taxnomy.tar.gz"))
+            calls.append((obiTaxonomy.Taxonomy.DOMAIN,
+                          obiTaxonomy.Taxonomy.FILENAME))
             count += 1
         org = self.annotationCodes[min(self.annotationIndex, len(self.annotationCodes)-1)]
         if org != self.loadedAnnotationCode:
@@ -486,8 +483,8 @@ class OWGOEnrichmentAnalysis(OWWidget):
                 calls.append(("GO", self.annotationFiles[org]))
                 count += 1
                 
-        if "gene_ontology_edit.obo.tar.gz" not in go_files:
-            calls.append(("GO", "gene_ontology_edit.obo.tar.gz"))
+        if obiGO.Ontology.FILENAME not in go_files:
+            calls.append(("GO", obiGO.Ontology.FILENAME))
             count += 1
         if not self.ontology:
             count += 1

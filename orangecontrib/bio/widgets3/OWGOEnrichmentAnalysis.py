@@ -40,17 +40,18 @@ def listAvailable():
     ret = {}
     for file in files:
         tags = serverfiles.info("GO", file)["tags"]
-        td = dict([tuple(tag.split(":")) for tag in tags
+        td = dict([tuple(tag.split(":", 1)) for tag in tags
                    if tag.startswith("#") and ":" in tag])
-        if "association" in file.lower():
+        if "association" in file.lower() and \
+                td.get("#version", None) == str(go.Annotations.version):
             ret[td.get("#organism", file)] = file
 
-    essential = ["gene_association.%s.tar.gz" % go.from_taxid(taxid)
-             for taxid in taxonomy.common_taxids()
-             if go.from_taxid(taxid)]
+    essential = ["gene_association.%s" % go.from_taxid(taxid)
+                 for taxid in taxonomy.common_taxids()
+                 if go.from_taxid(taxid)]
     essentialNames = [taxonomy.name(taxid)
-                  for taxid in taxonomy.common_taxids()
-                  if go.from_taxid(taxid)]
+                      for taxid in taxonomy.common_taxids()
+                      if go.from_taxid(taxid)]
     ret.update(zip(essentialNames, essential))
     return ret
 
@@ -381,7 +382,7 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
                 print(ex)
 
             if code is not None:
-                filename = "gene_association.%s.tar.gz" % code
+                filename = "gene_association.%s" % code
                 if filename in self.annotationFiles.values():
                     self.annotationIndex = \
                             [i for i, name in enumerate(self.annotationCodes) \
@@ -468,12 +469,14 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
     def Load(self, pb=None):
 
         if self.__state == OWGOEnrichmentAnalysis.Ready:
-            go_files, tax_files = serverfiles.listfiles("GO"), serverfiles.listfiles("Taxonomy")
+            go_files = serverfiles.listfiles("GO")
+            tax_files = serverfiles.listfiles("Taxonomy")
             calls = []
             pb, finish = (gui.ProgressBar(self, 0), True) if pb is None else (pb, False)
             count = 0
             if not tax_files:
-                calls.append(("Taxonomy", "ncbi_taxnomy.tar.gz"))
+                calls.append((taxonomy.Taxonomy.DOMAIN,
+                              taxonomy.Taxonomy.FILENAME))
                 count += 1
             org = self.annotationCodes[min(self.annotationIndex, len(self.annotationCodes)-1)]
             if org != self.loadedAnnotationCode:
@@ -482,8 +485,8 @@ class OWGOEnrichmentAnalysis(widget.OWWidget):
                     calls.append(("GO", self.annotationFiles[org]))
                     count += 1
 
-            if "gene_ontology_edit.obo.tar.gz" not in go_files:
-                calls.append(("GO", "gene_ontology_edit.obo.tar.gz"))
+            if go.Ontology.FILENAME not in go_files:
+                calls.append(("GO", go.Ontology.FILENAME))
                 count += 1
             if not self.ontology:
                 count += 1
