@@ -13,6 +13,7 @@ import re
 import sys
 import shutil
 import warnings
+import io
 
 from collections import defaultdict
 from operator import attrgetter
@@ -340,11 +341,15 @@ class Ontology(object):
             if os.path.isfile(file) and tarfile.is_tarfile(file):
                 f = tarfile.open(file).extractfile("gene_ontology_edit.obo")
             elif os.path.isfile(file):
-                f = open(file)
+                f = io.open(file, "rb")
             elif os.path.isdir(file):
-                f = open(os.path.join(file, "gene_ontology_edit.obo"))
+                f = io.open(os.path.join(file, "gene_ontology_edit.obo"), "rb")
             else:
                 raise ValueError("Cannot open %r for parsing" % file)
+
+            if six.PY3:
+                f = io.TextIOWrapper(f, encoding="utf-8")
+
         else:
             f = file
 
@@ -869,13 +874,17 @@ class Annotations(object):
             if os.path.isfile(file) and tarfile.is_tarfile(file):
                 f = tarfile.open(file).extractfile("gene_association")
             elif os.path.isfile(file) and file.endswith(".gz"):
-                f = gzip.open(file)
+                f = gzip.open(file, "rb")
             elif os.path.isfile(file):
-                f = open(file)
+                f = io.open(file, "rb")
             elif os.path.isdir(file):
-                f = open(os.path.join(file, "gene_association"))
+                f = io.open(os.path.join(file, "gene_association"), "rb")
             else:
                 raise ValueError("Cannot open %r for parsing." % file)
+
+            if six.PY3:
+                f = io.TextIOWrapper(f, encoding="utf-8")
+
         else:
             f = file
         lines = [line for line in f.read().splitlines() if line.strip()]
