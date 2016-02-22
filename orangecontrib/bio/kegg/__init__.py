@@ -136,14 +136,12 @@ class Organism(object):
 
         .. note::
 
-            This only includes 'ncbi-geneid' and 'ncbi-gi' records
-            from the KEGG Genes DBLINKS entries.
+            This only includes 'ncbi-geneid' records from the KEGG Genes
+            DBLINKS entries.
 
         """
         definitions = self.api.list(self.org_code)
         ncbi_geneid = self.api.conv(self.org_code, "ncbi-geneid")
-        ncbi_gi = self.api.conv(self.org_code, "ncbi-gi")
-
         aliases = defaultdict(set)
 
         for entry_id, definition in definitions:
@@ -154,7 +152,7 @@ class Organism(object):
             names = definition.split(";")[0].split(",")
             aliases[entry_id].update([name.strip() for name in names])
 
-        for source_id, target_id in chain(ncbi_geneid, ncbi_gi):
+        for source_id, target_id in ncbi_geneid:
             aliases[target_id].add(source_id.split(":", 1)[1])
 
         return [set([entry_id]).union(names)
