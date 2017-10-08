@@ -289,6 +289,9 @@ class Ontology(object):
     """
     version = 1
 
+    DOMAIN = "GO"
+    FILENAME = "gene_ontology_edit.obo.tar.gz"
+
     def __init__(self, filename=None, progress_callback=None, rev=None):
         self.terms = {}
         self.typedefs = {}
@@ -316,7 +319,7 @@ class Ontology(object):
                             if progress_callback else None)
         else:
             filename = serverfiles.localpath_download(
-                "GO", "gene_ontology_edit.obo.tar.gz"
+                self.DOMAIN, self.FILENAME
             )
             self.parse_file(filename, progress_callback)
 
@@ -330,7 +333,7 @@ class Ontology(object):
         filename = os.path.join(default_database_path,
                                 "gene_ontology_edit.obo.tar.gz")
         if not os.path.isfile(filename) and not os.path.isdir(filename):
-            serverfiles.download("GO", "gene_ontology_edit.obo.tar.gz")
+            serverfiles.download(cls.DOMAIN, cls.FILENAME)
 
         return cls(filename, progress_callback=progress_callback)
 
@@ -1485,12 +1488,40 @@ class Taxonomy(object):
                 "4754": None,  # Pneumocystis carinii
                 "10116": "rgd",  # Rattus norvegicus
                 "4932": "sgd",  # Saccharomyces cerevisiae
-                "4896": "GeneDB_Spombe",  # Schizosaccharomyces pombe
+                "4896": "pombase",  # Schizosaccharomyces pombe
                 "31033": None,  # Takifugu rubripes
                 "8355": None,  # Xenopus laevis
                 "4577": None,  # Zea mays
                 "5476": "cgd",
                 }
+
+    # See http://geneontology.org/gene-associations/go_annotation_metadata.json
+    # Not sure if the file is part of the 'public' api
+    gaf_filename = {
+        "3702": "gene_association.tair.gz",  # Arabidopsis thaliana
+        "9913": "goa_cow.gaf.gz",  # Bos taurus
+        "6239": "gene_association.wb.gz",  # Caenorhabditis elegans
+        "3055": None,  # Chlamydomonas reinhardtii
+        "7955": "gene_association.zfin.gz",  # Danio rerio (zebrafish)
+        "352472": "gene_association.dictyBase.gz",  # Dictyostelium discoideum
+        "7227": "gene_association.fb.gz",  # Drosophila melanogaster
+        "562": "gene_association.ecocyc.gz",  # Escherichia coli
+        "11103": None,  # Hepatitis C virus
+        "9606": "goa_human.gaf.gz",  # Homo sapiens
+        "10090": "gene_association.mgi.gz",  # Mus musculus
+        "2104": None,  # Mycoplasma pneumoniae
+        "4530": "gene_association.gramene_oryza.gz",  # Oryza sativa
+        "5833": "gene_association.GeneDB_Pfalciparum.gz",  # Plasmodium falciparum
+        "4754": None,  # Pneumocystis carinii
+        "10116": "gene_association.rgd.gz",  # Rattus norvegicus
+        "4932": "gene_association.sgd.gz",  # Saccharomyces cerevisiae
+        "4896": "gene_association.pombase.gz",  # Schizosaccharomyces pombe
+        "31033": None,  # Takifugu rubripes
+        "8355": None,  # Xenopus laevis
+        "4577": None,  # Zea mays
+        "5476": "gene_association.cgd.gz",
+    }
+
     version = 1
     __shared_state = {"tax": None}
 

@@ -174,7 +174,7 @@ class GeneOntologyResource(Resource):
 
 class OntologyResource(Resource):
     HOME = "http://www.gomapman.org"
-    VERSION = "2017-03-14"  # export date
+    VERSION = "2017-09-05"  # export date
     FILENAME = "ontology.obo"
     URL = "http://www.gomapman.org/export/{VERSION}/OBO/{FILENAME}"
     LICENSE = "CC BY-NC-SA 3.0"
@@ -183,7 +183,7 @@ class OntologyResource(Resource):
 
 class MappingResource(Resource):
     HOME = "http://www.gomapman.org"
-    VERSION = "2017-03-14"  # export date
+    VERSION = "2017-09-05"  # export date
     FILENAME = "{organism.orgcode}_{mapping.identifiertag}_{VERSION}_mapping.txt.gz"
     URL = "http://www.gomapman.org/export/{VERSION}/mapman/{FILENAME}"
     LICENSE = "CC BY-NC-SA 3.0"
